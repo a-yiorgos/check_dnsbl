@@ -1,0 +1,76 @@
+#!/usr/bin/perl -w
+#
+# yiorgos, Fri Oct 13 16:09:52 EEST 2006
+# Normally this *must* follow the Nagios plugin guidelines:
+# http://nagiosplug.sourceforge.net/developer-guidelines.html
+#
+
+# Yes these three lines are needed because of the embedded Perl interpreter
+#
+use vars;
+use strict;
+use Net::DNS;
+my(
+	$host,
+	$notfound,
+	$notprinted,
+	$revip,
+	$dnsbl,
+	@dnsbl_list,
+	$ans,
+	$res,
+	$rr,
+	$rq);
+
+# Initialise the @dnsbl_list array
+# 
+push @dnsbl_list, "bl.spamcop.net";
+push @dnsbl_list, "list.dsbl.org";
+push @dnsbl_list, "multihop.dsbl.org";
+push @dnsbl_list, "unconfirmed.dsbl.org";
+# For debugging purposes, normally it should be commented out
+# since it is a whitelist not a blacklist
+#yiorgos#push @dnsbl_list, "grwhitelist.tee.gr";
+
+$host = shift or die "you must give a hostname";
+
+$notfound = 1;
+$res = Net::DNS::Resolver->new;
+$rq = $res->search($host);
+if ($rq) {
+	foreach $rr ($rq->answer) {
+		next unless $rr->type eq "A";
+		$notfound = 0;
+		$revip = $rr->address;
+		$revip =~ s/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/$4.$3.$2.$1/;
+		last;
+	}
+}
+if ($notfound) {
+	print "DNSBL ERROR: $host IPv4 address not found";
+	exit 3;
+}
+
+$notfound = 1;
+$notprinted = 1;
+foreach $dnsbl (@dnsbl_list) {
+	$rq = $res->search("$revip.$dnsbl");
+	if ($rq) {
+		foreach $rr ($rq->answer) {
+			next unless $rr->type eq "A";
+			$notfound = 0;
+			if ($notprinted) {
+				print "DNSBL LISTED:";
+				$notprinted = 0;
+			}
+			print " $dnsbl";
+		}
+	}
+}
+
+if ($notfound) {
+	print "DNSBL OK: @dnsbl_list";
+	exit 0;
+} else {
+	exit 2;
+}
